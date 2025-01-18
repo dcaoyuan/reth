@@ -34,6 +34,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
+    ConfigureEvm
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
@@ -486,13 +487,14 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, E, T, V>
+pub struct EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
     T: EngineTypes,
 {
     provider: P,
     executor_provider: E,
+    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -534,14 +536,15 @@ where
     state_root_task_pool: Arc<rayon::ThreadPool>,
 }
 
-impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, E, T, V>
+impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
+            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -560,7 +563,7 @@ where
     }
 }
 
-impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
+impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -574,6 +577,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
+    C: ConfigureEvm,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -592,6 +596,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
         engine_kind: EngineApiKind,
+        evm_config: C,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
@@ -611,6 +616,7 @@ where
         Self {
             provider,
             executor_provider,
+            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -652,6 +658,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         kind: EngineApiKind,
+        evm_config: C,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -683,6 +690,7 @@ where
             payload_builder,
             config,
             kind,
+            evm_config,
         );
         task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
@@ -2811,6 +2819,7 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{Block, EthPrimitives};
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
@@ -2883,6 +2892,7 @@ mod tests {
             MockExecutorProvider,
             EthEngineTypes,
             EthereumEngineValidator,
+            EthEvmConfig,
         >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
@@ -2929,6 +2939,8 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
+            let evm_config = EthEvmConfig::new(chain_spec.clone());
+
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
                 executor_provider.clone(),
@@ -2942,6 +2954,7 @@ mod tests {
                 payload_builder,
                 TreeConfig::default(),
                 EngineApiKind::Ethereum,
+                evm_config,
             );
 
             let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
