@@ -3504,18 +3504,18 @@ mod tests {
         tree_state.insert_executed(blocks[0].clone());
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            &blocks[1].recovered_block().header()
+            blocks[1].recovered_block().header()
         ));
 
         tree_state.insert_executed(blocks[1].clone());
 
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            &blocks[2].recovered_block().header()
+            blocks[2].recovered_block().header()
         ));
         assert!(tree_state.is_descendant(
             blocks[1].recovered_block().num_hash(),
-            &blocks[2].recovered_block().header()
+            blocks[2].recovered_block().header()
         ));
     }
 
@@ -3795,7 +3795,7 @@ mod tests {
         assert_eq!(saved_blocks, vec![blocks[0].clone()]);
 
         // send the response so we can advance again
-        sender.send(Some(blocks[0].block.num_hash())).unwrap();
+        sender.send(Some(blocks[0].recovered_block().num_hash())).unwrap();
 
         // reorg case
         let result = test_harness.tree.on_new_head(fork_block_5.recovered_block().hash()).unwrap();
