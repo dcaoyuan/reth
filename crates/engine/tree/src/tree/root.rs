@@ -562,7 +562,9 @@ where
                             continue
                         };
 
-                        proofs_processed += 1;
+                        if !proof_calculated.update.state.is_empty() {
+                            proofs_processed += 1;
+                        }
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
