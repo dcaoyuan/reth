@@ -2552,6 +2552,12 @@ where
             // create the tx env and reset nonce
             let mut tx_env = evm_config.tx_env(&tx, sender);
             tx_env.nonce = None;
+
+            // exit early if execution is done
+            if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                return
+            }
+
             let ResultAndState { state, .. } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
@@ -2560,6 +2566,7 @@ where
                 }
             };
 
+            // if execution is finished there is no point to sending proof targets
             if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
                 return
             }

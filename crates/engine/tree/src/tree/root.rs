@@ -553,6 +553,15 @@ where
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
+                        let Some(sparse_trie_tx_ref) = sparse_trie_tx.as_ref() else {
+                            debug!(
+                                target: "engine::root",
+                                sequence = proof_calculated.sequence_number,
+                                "Ignoring proofs because state root task has started"
+                            );
+                            continue
+                        };
+
                         proofs_processed += 1;
                         debug!(
                             target: "engine::root",
@@ -564,10 +573,7 @@ where
                         if let Some(combined_update) =
                             self.on_proof(proof_calculated.sequence_number, proof_calculated.update)
                         {
-                            let _ = sparse_trie_tx
-                                .as_ref()
-                                .expect("tx not dropped")
-                                .send(combined_update);
+                            let _ = sparse_trie_tx_ref.send(combined_update);
                         }
 
                         let all_proofs_received = proofs_processed >= updates_received;
