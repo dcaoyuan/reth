@@ -295,7 +295,6 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<StateRootMessage>,
-    thread_pool: Arc<rayon::ThreadPool>,
 }
 
 /// Manages concurrent multiproof calculations.
@@ -310,6 +309,8 @@ struct MultiproofManager<Factory> {
     inflight: usize,
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
+    /// Thread pool to spawn multiproof calculations.
+    thread_pool: Arc<rayon::ThreadPool>,
 }
 
 impl<Factory> MultiproofManager<Factory>
@@ -322,10 +323,15 @@ where
         + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(thread_pool_size: usize) -> Self {
+    fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
-        Self { max_concurrent, inflight: 0, pending: VecDeque::with_capacity(max_concurrent) }
+        Self {
+            thread_pool,
+            max_concurrent,
+            inflight: 0,
+            pending: VecDeque::with_capacity(max_concurrent),
+        }
     }
 
     /// Spawns a new multiproof calculation or enqueues it for later if
@@ -357,10 +363,10 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-            thread_pool,
         } = input;
+        let thread_pool = self.thread_pool.clone();
 
-        thread_pool.clone().spawn(move || {
+        self.thread_pool.spawn(move || {
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
@@ -368,7 +374,7 @@ where
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = calculate_multiproof(thread_pool.clone(), config, proof_targets.clone());
+            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
@@ -444,8 +450,8 @@ where
             tx,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            thread_pool,
-            multiproof_manager: MultiproofManager::new(thread_pool_size()),
+            thread_pool: thread_pool.clone(),
+            multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
         }
     }
 
@@ -513,7 +519,6 @@ where
             proof_targets: targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
-            thread_pool: self.thread_pool.clone(),
         });
     }
 
@@ -531,7 +536,6 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender: self.tx.clone(),
-            thread_pool: self.thread_pool.clone(),
         });
     }
 
